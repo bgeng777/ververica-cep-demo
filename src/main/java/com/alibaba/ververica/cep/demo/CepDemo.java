@@ -1,51 +1,37 @@
 package com.alibaba.ververica.cep.demo;
 
-import com.alibaba.ververica.cep.demo.condition.CustomMiddleCondition;
-import com.alibaba.ververica.cep.demo.dynamic.TestPatternProcessorDiscovererFactory;
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.common.typeinfo.TypeHint;
-import org.apache.flink.api.common.typeinfo.TypeInformation;
+import com.alibaba.ververica.cep.demo.condition.MiddleCondition;
+import org.apache.flink.api.common.typeinfo.Types;
 import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.cep.CEP;
-import org.apache.flink.cep.TimeBehaviour;
-import org.apache.flink.cep.dynamic.impl.json.util.CepJsonUtils;
+import org.apache.flink.cep.PatternStream;
+//import org.apache.flink.cep.TimeBehaviour;
+//import org.apache.flink.cep.dynamic.impl.json.util.CepJsonUtils;
 import org.apache.flink.cep.nfa.aftermatch.AfterMatchSkipStrategy;
 import org.apache.flink.cep.pattern.Pattern;
-import org.apache.flink.connector.kafka.source.KafkaSource;
-import org.apache.flink.connector.kafka.source.enumerator.initializer.OffsetsInitializer;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.datastream.DataStreamUtils;
 import org.apache.flink.streaming.api.datastream.KeyedStream;
-import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 
 import com.alibaba.ververica.cep.demo.condition.EndCondition;
 import com.alibaba.ververica.cep.demo.condition.StartCondition;
-import com.alibaba.ververica.cep.demo.dynamic.JDBCPeriodicPatternProcessorDiscovererFactory;
 import com.alibaba.ververica.cep.demo.event.Event;
-import com.alibaba.ververica.cep.demo.event.EventDeSerializationSchema;
+import org.apache.flink.streaming.api.functions.AssignerWithPunctuatedWatermarks;
+import org.apache.flink.streaming.api.watermark.Watermark;
 
 import java.util.ArrayList;
 import java.util.List;
 
-import static com.alibaba.ververica.cep.demo.Constants.INPUT_TOPIC_ARG;
-import static com.alibaba.ververica.cep.demo.Constants.INPUT_TOPIC_GROUP_ARG;
-import static com.alibaba.ververica.cep.demo.Constants.JDBC_DRIVE;
-import static com.alibaba.ververica.cep.demo.Constants.JDBC_INTERVAL_MILLIS_ARG;
-import static com.alibaba.ververica.cep.demo.Constants.JDBC_URL_ARG;
-import static com.alibaba.ververica.cep.demo.Constants.KAFKA_BROKERS_ARG;
-import static com.alibaba.ververica.cep.demo.Constants.TABLE_NAME_ARG;
-
 public class CepDemo {
-
-    public static void printTestPattern(Pattern<?, ?> pattern) throws JsonProcessingException {
-        System.out.println(CepJsonUtils.convertPatternToJSONString(pattern));
-    }
+//
+//    public static void printTestPattern(Pattern<?, ?> pattern) throws JsonProcessingException {
+//        System.out.println(CepJsonUtils.convertPatternToJSONString(pattern));
+//    }
 
     public static void checkArg(String argName, MultipleParameterTool params) {
         if (!params.has(argName)) {
@@ -100,12 +86,12 @@ public class CepDemo {
         // show how to print test pattern in json format
         Pattern<Event, Event> pattern =
                 Pattern.<Event>begin("start", AfterMatchSkipStrategy.skipPastLastEvent())
-                        .where(new StartCondition("action == 0"))
+                        .where(new StartCondition())
                         .followedBy("middle")
-                        .where(new CustomMiddleCondition(  new String[] {"eventArgs.detail.price > 10000", "A"}))
+                        .where(new MiddleCondition())
                         .followedBy("end")
                         .where(new EndCondition());
-        printTestPattern(pattern);
+//        printTestPattern(pattern);
 
         // Dynamic CEP patterns
 //        SingleOutputStreamOperator<String> output =
@@ -125,21 +111,57 @@ public class CepDemo {
         DataStream<Event> input =
                 env.fromElements(
                         new Event(2, "start", 0, 1, 0L, "{ \"group\": \"A\", \"detail\": {\"price\": 12300}}"),
-                        new Event(2, "middle", 0, 1, 0L, "{ \"group\": \"AA\", \"detail\": {\"price\": 12300}}"),
-                        new Event(2, "end", 0, 1, 0L, "{ \"group\": \"A\", \"detail\": {\"price\": 12300}}"));
+                        new Event(3, "start", 0, 1, 1L, "{ \"group\": \"A\", \"detail\": {\"price\": 12300}}"),
+                        new Event(2, "middle", 0, 1, 2L, "{ \"group\": \"AA\", \"detail\": {\"price\": 12300}}"),
+                        new Event(3, "middle", 0, 1, 3L, "{ \"group\": \"AA\", \"detail\": {\"price\": 12300}}"),
+                        new Event(2, "end", 0, 1, 4L, "{ \"group\": \"A\", \"detail\": {\"price\": 12300}}"),
+                        new Event(3, "end", 0, 1, 5L, "{ \"group\": \"A\", \"detail\": {\"price\": 12300}}"),
+                        new Event(4, "end", 0, 1, 15L, "{ \"group\": \"A\", \"detail\": {\"price\": 12300}}"));
+        input = input.assignTimestampsAndWatermarks(new AssignerWithPunctuatedWatermarks<Event>() {
 
-        // Dynamic CEP patterns
-        SingleOutputStreamOperator<String> result =
-                CEP.dynamicPatterns(
-                        input,
-                        new TestPatternProcessorDiscovererFactory(
-                                CepJsonUtils.convertPatternToJSONString(pattern)),
-                        TimeBehaviour.ProcessingTime,
-                        TypeInformation.of(new TypeHint<String>() {}));
-        List<String> resultList = new ArrayList<>();
-        DataStreamUtils.collect(result).forEachRemaining(resultList::add);
-        System.out.println(resultList);
+            @Override
+            public long extractTimestamp(
+                    Event element, long currentTimestamp) {
+                return element.getEventTime();
+            }
+
+            @Override
+            public Watermark checkAndGetNextWatermark(
+                    Event lastElement,
+                    long extractedTimestamp) {
+                return new Watermark(lastElement.getEventTime() - 5);
+            }
+        } );
+
+        KeyedStream<Event, Tuple2<Integer, Integer>> keyedStream =
+                input
+                        .keyBy(
+                new KeySelector<Event, Tuple2<Integer, Integer>>() {
+
+                    @Override
+                    public Tuple2<Integer, Integer> getKey(Event value) throws Exception {
+                        return Tuple2.of(value.getId(), value.getProductionId());
+                    }
+                });
+
+        DataStream<String> result =
+                CEP.pattern(keyedStream, pattern)
+                        .inEventTime()
+                        .flatSelect(
+                                (p, o) -> {
+                                    StringBuilder builder = new StringBuilder();
+
+                                    builder.append(p.get("start").get(0).getId())
+                                            .append(",")
+                                            .append(p.get("middle").get(0).getId())
+                                            .append(",")
+                                            .append(p.get("end").get(0).getId());
+
+                                    o.collect(builder.toString());
+                                },
+                                Types.STRING);
+        result.print();
         // Compile and submit the job
-//        env.execute("CEPDemo");
+        env.execute("CEPDemo");
     }
 }
