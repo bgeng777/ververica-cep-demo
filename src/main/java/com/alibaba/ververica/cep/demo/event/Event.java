@@ -1,6 +1,7 @@
 package com.alibaba.ververica.cep.demo.event;
 
 import javax.annotation.Nullable;
+
 import java.util.Objects;
 
 /** Exemplary event for usage in tests of CEP. */
@@ -13,7 +14,13 @@ public class Event {
     private final long eventTime;
     private final String eventArgs;
 
-    public Event(int id, String name, int action, int productionId, long timestamp, @Nullable String eventArgs) {
+    public Event(
+            int id,
+            String name,
+            int action,
+            int productionId,
+            long timestamp,
+            @Nullable String eventArgs) {
         this.id = id;
         this.name = name;
         this.action = action;
